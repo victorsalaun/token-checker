@@ -6,9 +6,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/kelseyhightower/envconfig"
 	"log"
+	"net/url"
 	"os"
 )
 
@@ -35,7 +35,7 @@ func process(args []string) int {
 	creds = &aws.Config{Credentials: credentials.NewStaticCredentials(token.AwsAccessKeyId, token.AwsSecretAccessKey, "")}
 
 	iamChecker()
-	s3Checker()
+	//s3Checker()
 
 	return 0
 }
@@ -43,28 +43,55 @@ func process(args []string) int {
 func iamChecker() {
 	iamsvc := iam.New(sess, creds, region)
 
-	result, err := iamsvc.GetUser(&iam.GetUserInput{})
-
+	user, err := iamsvc.GetUser(&iam.GetUserInput{})
 	if err != nil {
 		fmt.Println("Failed to get user", err)
 		return
 	}
+	fmt.Println("User:")
+	fmt.Printf("%s\n", user.GoString())
 
-	fmt.Printf("%s\n", result.GoString())
-}
-
-func s3Checker() {
-	s3svc := s3.New(sess, creds, region)
-
-	result, err := s3svc.ListBuckets(&s3.ListBucketsInput{})
-
+	userGroups, err := iamsvc.ListGroupsForUser(&iam.ListGroupsForUserInput{UserName: user.User.UserName})
 	if err != nil {
-		fmt.Println("Failed to list buckets", err)
+		fmt.Println("Failed to get user groups", err)
 		return
 	}
+	fmt.Println("User groups:")
+	fmt.Printf("%s\n", userGroups.Groups)
 
-	fmt.Println("Buckets:")
-	for _, bucket := range result.Buckets {
-		fmt.Printf("%s\n", aws.StringValue(bucket.Name))
+	for _, group := range userGroups.Groups {
+		groupPolicies, err := iamsvc.ListGroupPolicies(&iam.ListGroupPoliciesInput{GroupName: group.GroupName})
+		if err != nil {
+			fmt.Println("Failed to get group policies", err)
+			return
+		}
+		fmt.Printf("Group %s policies:\n", *group.GroupName)
+		fmt.Printf("%s\n", groupPolicies.String())
+
+		groupAttachedPolicies, err := iamsvc.ListAttachedGroupPolicies(&iam.ListAttachedGroupPoliciesInput{GroupName: group.GroupName})
+		if err != nil {
+			fmt.Println("Failed to get group attached policies", err)
+			return
+		}
+		fmt.Printf("Group %s attached policies:\n", *group.GroupName)
+		fmt.Printf("%s\n", groupAttachedPolicies.String())
+
+		for _, policy := range groupAttachedPolicies.AttachedPolicies {
+			fetchedPolicy, err := iamsvc.GetPolicy(&iam.GetPolicyInput{PolicyArn: policy.PolicyArn})
+			if err != nil {
+				fmt.Println("Failed to get policies", err)
+				return
+			}
+			fmt.Printf("Policy for %s permissions:\n", *policy.PolicyName)
+			version, _ := iamsvc.GetPolicyVersion(&iam.GetPolicyVersionInput{PolicyArn: policy.PolicyArn, VersionId: fetchedPolicy.Policy.DefaultVersionId})
+			document, _ := parsePolicyDocument(version.PolicyVersion.Document)
+			fmt.Printf("version %s\n", document)
+		}
+
 	}
+}
+
+func parsePolicyDocument(p *string) (string, error) {
+	parsedDoc, _ := url.QueryUnescape(*p)
+	return parsedDoc, nil
 }
