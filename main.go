@@ -27,15 +27,19 @@ func main() {
 
 func process(args []string) int {
 	var token Token
-	if err := envconfig.Process("", &token); err != nil {
-		log.Printf("[ERROR] Failed to process env var: %s", err)
-		return 1
+	if len(args) == 2 {
+		token.AwsAccessKeyId = args[0]
+		token.AwsSecretAccessKey = args[1]
+	} else {
+		if err := envconfig.Process("", &token); err != nil {
+			log.Printf("[ERROR] Failed to process env var: %s", err)
+			return 1
+		}
 	}
 
 	creds = &aws.Config{Credentials: credentials.NewStaticCredentials(token.AwsAccessKeyId, token.AwsSecretAccessKey, "")}
 
 	iamChecker()
-	//s3Checker()
 
 	return 0
 }
